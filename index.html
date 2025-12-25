@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robots First: A City Transformed</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: 'Press Start 2P', cursive;
+      padding: 10px;
+    }
+    .header { text-align: center; margin-bottom: 10px; }
+    .title { color: #fff; font-size: 20px; text-shadow: 3px 3px 0 #ff6b6b, -1px -1px 0 #4ecdc4; margin-bottom: 6px; }
+    .subtitle { color: #888; font-size: 8px; }
+    .zone-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+    .zone-tab {
+      padding: 8px 16px; background: #1a1a3a; border: 2px solid #333;
+      border-radius: 4px 4px 0 0; color: #666; font-family: 'Press Start 2P', cursive;
+      font-size: 8px; cursor: pointer; transition: all 0.2s;
+    }
+    .zone-tab:hover { background: #2a2a4a; color: #888; }
+    .zone-tab.active { background: #2a2a4a; border-color: #4ecdc4; color: #4ecdc4; border-bottom-color: #2a2a4a; }
+    .game-container { background: #000; border: 4px solid #333; border-radius: 8px; box-shadow: 0 0 60px rgba(78, 205, 196, 0.2); overflow: hidden; }
+    canvas { display: block; image-rendering: pixelated; }
+    .controls { width: 1000px; padding: 12px 20px; background: #111; border: 4px solid #333; border-top: none; border-radius: 0 0 8px 8px; }
+    .era-display { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .year-display { color: #4ecdc4; font-size: 18px; }
+    .era-label { color: #ff6b6b; font-size: 9px; padding: 4px 8px; border: 2px solid currentColor; border-radius: 4px; }
+    .era-label.transition { color: #ffd93d; }
+    .era-label.future { color: #6bcb77; }
+    .timeline-container { position: relative; padding: 10px 0; }
+    .timeline-markers { display: flex; justify-content: space-between; margin-bottom: 4px; padding: 0 2px; }
+    .timeline-marker { color: #444; font-size: 7px; }
+    .timeline-slider { width: 100%; height: 12px; -webkit-appearance: none; background: linear-gradient(90deg, #ff6b6b 0%, #ffd93d 35%, #6bcb77 75%, #4ecdc4 100%); border-radius: 6px; cursor: pointer; }
+    .timeline-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 36px; background: linear-gradient(180deg, #fff 0%, #ddd 100%); border: 3px solid #4ecdc4; border-radius: 4px; cursor: grab; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    .hints { display: flex; justify-content: space-between; margin-top: 8px; }
+    .hint { color: #444; font-size: 7px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 class="title">ROBOTS FIRST</h1>
+    <p class="subtitle">A CITY TRANSFORMED • SCRUB TIMELINE TO EXPLORE</p>
+  </div>
+  <div class="zone-tabs">
+    <button class="zone-tab active" data-zone="residential">RESIDENTIAL</button>
+    <button class="zone-tab" data-zone="industrial">INDUSTRIAL</button>
+    <button class="zone-tab" data-zone="transit">TRANSIT HUB</button>
+    <button class="zone-tab" data-zone="downtown">DOWNTOWN</button>
+  </div>
+  <div class="game-container"><canvas id="canvas" width="1000" height="650"></canvas></div>
+  <div class="controls">
+    <div class="era-display">
+      <div class="year-display" id="year">2025</div>
+      <div class="era-label" id="era">THE CAR ERA</div>
+    </div>
+    <div class="timeline-container">
+      <div class="timeline-markers">
+        <span class="timeline-marker">2025</span><span class="timeline-marker">2030</span>
+        <span class="timeline-marker">2035</span><span class="timeline-marker">2040</span><span class="timeline-marker">2045</span>
+      </div>
+      <input type="range" class="timeline-slider" id="slider" min="0" max="100" value="0" step="0.1">
+    </div>
+    <div class="hints">
+      <span class="hint">◄ DRAG TO SCRUB ►</span><span class="hint">SPACE = AUTO-PLAY</span><span class="hint">CLICK TABS FOR ZONES</span>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const slider = document.getElementById('slider');
+    const yearEl = document.getElementById('year');
+    const eraEl = document.getElementById('era');
+    const zoneTabs = document.querySelectorAll('.zone-tab');
+    ctx.imageSmoothingEnabled = false;
+    
+    let progress = 0, targetProgress = 0, autoPlay = false, time = 0, currentZone = 'residential';
+    
+    slider.addEventListener('input', e => { targetProgress = e.target.value / 100; });
+    zoneTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        zoneTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentZone = tab.dataset.zone;
+      });
+    });
+    document.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); autoPlay = !autoPlay; } });
+    
+    // Helpers
+    function rect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
+    function circle(x, y, r, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+    function ellipse(x, y, rx, ry, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill(); }
+    function roundRect(x, y, w, h, r, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function parseColor(c) {
+      if (c.startsWith('#')) return [parseInt(c.slice(1,3), 16), parseInt(c.slice(3,5), 16), parseInt(c.slice(5,7), 16)];
+      const m = c.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+      return m ? [+m[1], +m[2], +m[3]] : [0,0,0];
+    }
+    function lerpColor(c1, c2, t) {
+      const [r1,g1,b1] = parseColor(c1), [r2,g2,b2] = parseColor(c2);
+      return `rgb(${Math.round(lerp(r1,r2,t))},${Math.round(lerp(g1,g2,t))},${Math.round(lerp(b1,b2,t))})`;
+    }
+    function shade(c, a) {
+      const [r,g,b] = parseColor(c), f = 1 + a;
+      return `rgb(${Math.min(255,Math.max(0,Math.round(r*f)))},${Math.min(255,Math.max(0,Math.round(g*f)))},${Math.min(255,Math.max(0,Math.round(b*f)))})`;
+    }
+    
+    // Sky
+    function drawSky(p, pollution = 0) {
+      const haze = pollution * (1 - p);
+      const top = lerpColor(lerpColor('#5a6a7a', '#7a7a7a', haze), '#6ab7d4', p);
+      const bot = lerpColor(lerpColor('#9aaaba', '#a5a5a5', haze), '#c8eaf5', p);
+      const grad = ctx.createLinearGradient(0, 0, 0, 280);
+      grad.addColorStop(0, top); grad.addColorStop(1, bot);
+      ctx.fillStyle = grad; rect(0, 0, 1000, 280);
+      ctx.globalAlpha = 1 - haze * 0.4;
+      circle(870, 65, 45, 'rgba(255,248,200,0.3)'); circle(870, 65, 32, '#fffef5');
+      ctx.globalAlpha = 1;
+      drawCloud(80, 50, 1); drawCloud(300, 35, 0.8); drawCloud(550, 55, 0.9); drawCloud(780, 45, 0.7);
+      for (let i = 0; i < Math.floor(p * 10); i++) {
+        const bx = 50 + i * 90 + Math.sin(time/1000 + i) * 20, by = 40 + Math.sin(time/800 + i*2) * 15;
+        ctx.strokeStyle = '#2a3a4a'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(bx - 5, by + 2); ctx.quadraticCurveTo(bx, by - 3, bx + 5, by + 2); ctx.stroke();
+      }
+    }
+    function drawCloud(x, y, s) {
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      circle(x, y + 6*s, 14*s); circle(x + 18*s, y + 8*s, 12*s);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      circle(x + 8*s, y, 18*s); circle(x + 32*s, y - 2*s, 20*s); circle(x + 50*s, y + 3*s, 15*s);
+    }
+    
+    // ==================== RESIDENTIAL ====================
+    function drawResidentialZone(p) {
+      drawSky(p, 0);
+      drawResidentialBuildings(p);
+      drawResidentialGround(p);
+      drawResidentialActivity(p);
+    }
+    
+    function drawResidentialBuildings(p) {
+      const buildings = [
+        { x: 20, w: 95, h: 115 }, { x: 135, w: 80, h: 95 }, { x: 240, w: 110, h: 135 },
+        { x: 380, w: 85, h: 110 }, { x: 490, w: 100, h: 125 }, { x: 620, w: 80, h: 100 },
+        { x: 725, w: 105, h: 120 }, { x: 855, w: 85, h: 105 }
+      ];
+      
+      buildings.forEach((b, i) => {
+        const h = b.h + p * 55;
+        const y = 390 - h;
+        
+        rect(b.x + 3, y - 3, b.w, h, '#3d3d5c');
+        rect(b.x, y, b.w, h, '#5a5a7a');
+        rect(b.x, y, b.w, 3, '#7a7a9a');
+        
+        // Windows
+        for (let row = 0; row < h / 22; row++) {
+          for (let col = 0; col < b.w / 18; col++) {
+            const wx = b.x + 5 + col * 18, wy = y + 8 + row * 22;
+            if (row === Math.floor(h/22) - 1 && col >= b.w/36 - 1 && col <= b.w/36) continue;
+            const lit = (i + row + col + Math.floor(time/5000)) % 4 !== 0;
+            const blue = p > 0.55 && (row + col + i) % 6 === 0;
+            rect(wx, wy, 13, 16, blue ? '#4a9fff' : (lit ? '#ffd700' : '#1a1a2e'));
+            if (lit && !blue) rect(wx + 2, wy + 2, 4, 5, '#ffe566');
+          }
+        }
+        
+        // Balconies (future)
+        if (p > 0.5) {
+          for (let bal = 2; bal < h / 22 - 1; bal += 2) {
+            if ((i + bal) % 3 === 0) {
+              rect(b.x + b.w - 2, y + 8 + bal * 22, 10, 18, '#6a6a8a');
+              rect(b.x + b.w, y + 10 + bal * 22, 6, 14, '#4a8c5a');
+            }
+          }
+        }
+        
+        // Ground floor: garage → shop/cafe
+        const gfY = 390 - 35;
+        if (p < 0.4) {
+          rect(b.x + b.w/2 - 25, gfY, 50, 35, '#2a2a2a');
+          for (let j = 0; j < 4; j++) rect(b.x + b.w/2 - 23, gfY + 4 + j * 7, 46, 2, '#1a1a1a');
+        } else {
+          const storeColor = ['#ff6b6b', '#4ecdc4', '#ffd93d', '#a8e6cf', '#dda0dd'][i % 5];
+          rect(b.x + 4, gfY + 5, b.w - 8, 30, '#87ceeb');
+          rect(b.x + 6, gfY + 7, b.w - 12, 26, '#a8d8ea');
+          rect(b.x + 2, gfY - 3, b.w - 4, 10, storeColor);
+          rect(b.x + b.w/2 - 8, gfY + 5, 16, 30, '#5d4037');
+          
+          // Awning
+          if (p > 0.6) {
+            rect(b.x + 3, gfY + 2, b.w - 6, 5, shade(storeColor, -0.2));
+          }
+          
+          // Outdoor seating
+          if (p > 0.65 && i % 2 === 0) {
+            drawCafeTable(b.x + 15, gfY + 28);
+            drawCafeTable(b.x + b.w - 25, gfY + 28);
+          }
+        }
+        
+        // Rooftop
+        if (p > 0.4) {
+          rect(b.x + 5, y - 5, b.w - 10, 7, '#5d4037');
+          for (let j = 0; j < (b.w - 14) / 12; j++) {
+            const ph = ((p - 0.4) / 0.6) * (8 + Math.sin(j) * 3);
+            rect(b.x + 8 + j * 12, y - 5 - ph, 3, ph, '#4caf50');
+            if (ph > 5) circle(b.x + 10 + j * 12, y - 7 - ph, 4, '#66bb6a');
+          }
+        }
+      });
+    }
+    
+    function drawResidentialGround(p) {
+      // Back sidewalk
+      rect(0, 275, 1000, 25, '#909090');
+      
+      // Parked cars → Planters & bike racks
+      if (p < 0.4) {
+        for (let i = 40; i < 950; i += 120) {
+          drawParkedCar(i, 280, ['#607d8b', '#d32f2f', '#1976d2', '#ffd54f'][Math.floor(i/120) % 4]);
+        }
+      } else {
+        for (let i = 40; i < 950; i += 120) {
+          drawPlanter(i, 282, 50);
+          if (p > 0.6) drawBikeRack(i + 60, 290);
+        }
+      }
+      
+      // Main road
+      const roadY = 300, roadH = 85;
+      const roadProgress = Math.max(0, Math.min(1, (p - 0.25) / 0.5));
+      
+      if (p < 0.3) {
+        // Full road with cars
+        rect(0, roadY, 1000, roadH, '#3a3a3a');
+        for (let i = 0; i < 1000; i += 55) rect(i + 10, roadY + 40, 35, 4, '#f0c040');
+        
+        // Multiple cars
+        drawCar(60 + (time/16) % 400, roadY + 12, '#d32f2f', 1);
+        drawCar(500 + (time/20) % 350, roadY + 12, '#607d8b', 1);
+        drawCar(750 - (time/18) % 380, roadY + 55, '#1976d2', -1);
+        drawCar(300 - (time/22) % 320, roadY + 55, '#ffd54f', -1);
+        
+      } else if (p < 0.65) {
+        // Transition: road narrowing
+        const tearP = (p - 0.3) / 0.35;
+        const asphaltW = lerp(1000, 200, tearP);
+        const asphaltX = (1000 - asphaltW) / 2;
+        
+        rect(0, roadY, 1000, roadH, lerpColor('#3a3a3a', '#8b7355', tearP * 0.7));
+        rect(asphaltX, roadY, asphaltW, roadH, '#3a3a3a');
+        
+        // Construction
+        if (tearP < 0.8) {
+          drawJackhammerRobot(asphaltX - 20, roadY + 42);
+          drawJackhammerRobot(asphaltX + asphaltW + 5, roadY + 42);
+        }
+        
+        // Grass appearing on sides
+        if (tearP > 0.3) {
+          const grassW = (1000 - asphaltW) / 2 * ((tearP - 0.3) / 0.7);
+          rect(0, roadY, grassW, roadH, '#5a8c5a');
+          rect(1000 - grassW, roadY, grassW, roadH, '#5a8c5a');
+        }
+        
+      } else {
+        // Greenway complete
+        rect(0, roadY, 1000, roadH, '#4a8c5a');
+        
+        // Grass texture
+        for (let i = 0; i < 1000; i += 8) {
+          rect(i, roadY + 5 + (i % 12), 2, 6 + Math.sin(i * 0.3) * 2, '#5a9c6a');
+        }
+        
+        // Central path
+        const pathW = 130, pathX = (1000 - pathW) / 2;
+        rect(pathX, roadY, pathW, roadH, '#c9b896');
+        for (let py = roadY; py < roadY + roadH; py += 18) {
+          for (let px = pathX; px < pathX + pathW; px += 22) {
+            rect(px + 1, py + 1, 20, 16, '#b8a785');
+          }
+        }
+        
+        // Side paths
+        rect(80, roadY + 25, 250, 35, '#d4c4a8');
+        rect(670, roadY + 25, 250, 35, '#d4c4a8');
+        
+        // Flowers along path
+        for (let i = pathX - 30; i > 50; i -= 40) drawFlowerCluster(i, roadY + 42);
+        for (let i = pathX + pathW + 30; i < 950; i += 40) drawFlowerCluster(i, roadY + 42);
+        
+        // Robot lanes
+        rect(50, roadY + 65, 120, 18, '#707070');
+        rect(830, roadY + 65, 120, 18, '#707070');
+      }
+      
+      // Front sidewalk
+      rect(0, 385, 1000, 30, '#a0a0a0');
+      for (let i = 0; i < 1000; i += 35) rect(i + 2, 387, 31, 26, i % 70 === 0 ? '#989898' : '#a8a8a8');
+      
+      // Front area
+      rect(0, 415, 1000, 235, lerpColor('#707070', '#4a8c5a', Math.max(0, (p - 0.4) * 2)));
+      if (p > 0.55) {
+        for (let i = 0; i < 1000; i += 10) rect(i, 420 + (i % 14), 3, 7, '#5a9c6a');
+      }
+      
+      // Trees
+      drawTree(25, 370, 0.5, p > 0.3 ? 1 : 0.6);
+      drawTree(975, 370, 0.5, p > 0.3 ? 1 : 0.6);
+      
+      const treePositions = [130, 270, 420, 550, 700, 850];
+      treePositions.forEach((tx, i) => {
+        const threshold = 0.25 + i * 0.08;
+        if (p > threshold) {
+          ctx.globalAlpha = Math.min(1, (p - threshold) / 0.12);
+          drawTree(tx, 372 + (i % 3) * 3, 0.55 + p * 0.2, 1);
+          ctx.globalAlpha = 1;
+        }
+      });
+    }
+    
+    function drawResidentialActivity(p) {
+      // === ALWAYS PRESENT: Base residents ===
+      drawPerson(100, 410, '#e91e63');
+      drawPerson(350, 408, '#2196f3');
+      drawPerson(600, 411, '#4caf50');
+      drawPerson(850, 409, '#ff9800');
+      
+      // People walking on back sidewalk
+      const walker1X = 50 + (time/25) % 900;
+      const walker2X = 950 - (time/30) % 900;
+      drawPerson(walker1X, 292, '#9c27b0');
+      drawPerson(walker2X, 290, '#00bcd4');
+      
+      // === TRANSITION: More activity ===
+      if (p > 0.35) {
+        ctx.globalAlpha = (p - 0.35) / 0.2;
+        drawPerson(200, 409, '#7e57c2');
+        drawPerson(450, 412, '#26a69a');
+        drawPerson(700, 408, '#ef5350');
+        
+        // Jogger
+        const joggerX = 100 + (time/12) % 800;
+        drawJogger(joggerX, 340);
+        ctx.globalAlpha = 1;
+      }
+      
+      // === GREENWAY ERA: Lots of activity ===
+      if (p > 0.6) {
+        ctx.globalAlpha = Math.min(1, (p - 0.6) / 0.15);
+        
+        // People on main path
+        drawPerson(470, 340, '#ff7043');
+        drawPerson(510, 338, '#42a5f5');
+        drawPerson(540, 342, '#66bb6a');
+        
+        // Couple walking
+        drawPerson(380, 345, '#ec407a');
+        drawPerson(395, 343, '#5c6bc0');
+        
+        // Kids playing with ball
+        drawChild(440, 335, '#ffca28');
+        drawChild(465, 332, '#26c6da');
+        const ballX = 450 + Math.sin(time/350) * 20;
+        const ballY = 325 + Math.abs(Math.sin(time/200)) * 12;
+        circle(ballX, ballY, 5, '#ff5722');
+        
+        // Dog walker
+        drawPerson(300, 350, '#8d6e63');
+        drawDog(320, 355);
+        
+        ctx.globalAlpha = 1;
+      }
+      
+      // Cyclists on side paths - persist once greenway exists
+      if (p > 0.65) {
+        const bikeX = 100 + (time/10) % 230;
+        drawCyclist(bikeX, 335);
+        const bikeX2 = 890 - (time/11) % 230;
+        drawCyclist(bikeX2, 335);
+      }
+      
+      // === FUTURE: Community life ===
+      if (p > 0.75) {
+        ctx.globalAlpha = (p - 0.75) / 0.25;
+        
+        // More families
+        drawPerson(150, 340, '#ab47bc');
+        drawChild(165, 338, '#ffb74d');
+        
+        drawPerson(650, 345, '#29b6f6');
+        drawChild(665, 342, '#ef9a9a');
+        drawChild(680, 344, '#a5d6a7');
+        
+        // People at cafe tables (ground floor)
+        drawSeatedPerson(140, 385, '#e91e63');
+        drawSeatedPerson(155, 385, '#2196f3');
+        drawSeatedPerson(510, 385, '#ff9800');
+        drawSeatedPerson(870, 385, '#9c27b0');
+        
+        // Elderly with helper robot
+        drawHelperRobot(750, 405);
+        drawElderlyPerson(785, 410);
+        
+        // Delivery robots
+        drawDeliveryRobot(110 + Math.sin(time/900) * 40, 378, 0.7);
+        drawDeliveryRobot(880 + Math.cos(time/1100) * 35, 378, 0.7);
+        
+        // Street musician
+        drawPerson(500, 410, '#ff5722');
+        circle(505, 400, 8, '#5d4037'); // guitar body
+        
+        // Small crowd around musician
+        drawTinyPerson(480, 412, '#e91e63');
+        drawTinyPerson(490, 414, '#2196f3');
+        drawTinyPerson(515, 413, '#4caf50');
+        drawTinyPerson(525, 411, '#ff9800');
+        
+        ctx.globalAlpha = 1;
+      }
+      
+      // Flying drone (late game)
+      if (p > 0.8) {
+        ctx.globalAlpha = (p - 0.8) / 0.2;
+        drawFlyingDrone(400 + Math.sin(time/2500) * 200, 100 + Math.sin(time/1800) * 20);
+        ctx.globalAlpha = 1;
+      }
+    }
+    
+    // ==================== TRANSIT HUB ====================
+    function drawTransitZone(p) {
+      drawSky(p, 0.1);
+      drawTransitBuildings(p);
+      drawTransitGround(p);
+      drawTransitActivity(p);
+    }
+    
+    function drawTransitBuildings(p) {
+      // === LEFT SIDE: BUS TERMINAL → POD HUB ===
+      const termX = 30, termW = 380;
+      
+      // Building transforms smoothly
+      const roofCurve = p * 40;
+      const buildingH = lerp(100, 120, p);
+      const buildingY = 290 - roofCurve;
+      
+      // Curved roof (grows with progress)
+      if (p > 0.3) {
+        ctx.globalAlpha = (p - 0.3) / 0.3;
+        ctx.fillStyle = '#e0e0e0';
+        ctx.beginPath();
+        ctx.ellipse(termX + termW/2, buildingY + 10, termW/2 + 30, roofCurve + 10, 0, Math.PI, 0);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      
+      // Main building
+      rect(termX, buildingY, termW, buildingH, '#607d8b');
+      rect(termX, buildingY, termW, 4, '#78909c');
+      
+      // Facade changes
+      if (p < 0.5) {
+        // Old: Regular windows
+        for (let i = 0; i < 8; i++) {
+          rect(termX + 15 + i * 45, buildingY + 20, 35, 50, '#1a1a2e');
+          rect(termX + 17 + i * 45, buildingY + 22, 31, 46, '#5a7a8a');
+        }
+        // Old signage
+        rect(termX + 140, buildingY + 5, 100, 15, '#1a1a2e');
+      } else {
+        // New: Glass facade
+        for (let i = 0; i < 9; i++) {
+          rect(termX + 12 + i * 42, buildingY + 15, 38, 80, '#4a8aaa');
+          rect(termX + 15 + i * 42, buildingY + 18, 12, 35, 'rgba(255,255,255,0.15)');
+        }
+        // Digital displays (no text - just animated lights)
+        rect(termX + 50, buildingY + 20, 80, 20, '#000');
+        for (let i = 0; i < 6; i++) {
+          const on = Math.floor(time/200 + i * 3) % 3 === 0;
+          rect(termX + 55 + i * 12, buildingY + 25, 8, 3, on ? '#4fc3f7' : '#0d47a1');
+          rect(termX + 55 + i * 12, buildingY + 31, 8, 3, '#4fc3f7');
+        }
+        
+        rect(termX + 250, buildingY + 20, 60, 20, '#000');
+        circle(termX + 280, buildingY + 30, 6, '#4caf50');
+      }
+      
+      // === PLATFORM AREA ===
+      const platformY = 390;
+      
+      if (p < 0.4) {
+        // Bus bays
+        for (let i = 0; i < 4; i++) {
+          const bayX = termX + 20 + i * 95;
+          rect(bayX, platformY, 80, 55, '#3a3a3a');
+          rect(bayX + 2, platformY + 2, 76, 51, '#2d2d2d');
+          
+          // Bus (some bays occupied)
+          if (i !== 2 && (i !== 1 || Math.floor(time/5000) % 2 === 0)) {
+            drawBus(bayX + 8, platformY + 12);
+          }
+          
+          // Bay number (visual only)
+          rect(bayX + 32, platformY + 5, 16, 12, '#1565c0');
+          rect(bayX + 36, platformY + 8, 8, 6, '#fff');
+        }
+        
+        // Waiting shelter
+        rect(termX + termW + 15, platformY - 30, 70, 35, '#78909c');
+        rect(termX + termW + 18, platformY - 25, 64, 28, 'rgba(135,206,235,0.3)');
+        rect(termX + termW + 25, platformY - 5, 50, 8, '#5d4037');
+        
+      } else {
+        // Pod platforms - smooth transition
+        const podAlpha = (p - 0.4) / 0.2;
+        
+        for (let i = 0; i < 5; i++) {
+          const platX = termX + 10 + i * 78;
+          
+          // Platform
+          rect(platX, platformY - 5, 70, 10, '#78909c');
+          rect(platX + 2, platformY - 3, 66, 6, '#90a4ae');
+          
+          // Charging station
+          rect(platX + 55, platformY - 20, 12, 18, '#37474f');
+          const charging = (i + Math.floor(time/2000)) % 3 === 0;
+          circle(platX + 61, platformY - 12, 4, charging ? '#ff9800' : '#4caf50');
+          
+          // Pod
+          if (i !== 2 || Math.floor(time/3000) % 2 === 1) {
+            drawAutoPod(platX + 8, platformY - 30);
+          }
+          
+          // Platform indicator (visual only)
+          rect(platX + 28, platformY - 15, 14, 10, '#1a1a2e');
+          rect(platX + 31, platformY - 12, 8, 4, '#4fc3f7');
+        }
+        
+        // Arriving pod animation
+        if (Math.floor(time/4000) % 2 === 0) {
+          const arriveX = termX + 180;
+          const arriveY = platformY - 50 + Math.abs(Math.sin(time/600)) * 20;
+          drawAutoPod(arriveX, arriveY);
+        }
+      }
+      
+      // === RIGHT SIDE: PARKING STRUCTURE → TRANSIT PLAZA ===
+      const parkX = 500, parkW = 200;
+      
+      // This was the parking garage - now showing clear transformation
+      if (p < 0.35) {
+        // Multi-story parking
+        const floors = 4;
+        rect(parkX, 290, parkW, 110, '#546e7a');
+        rect(parkX, 290, parkW, 4, '#78909c');
+        
+        for (let f = 0; f < floors; f++) {
+          rect(parkX + 5, 298 + f * 27, parkW - 10, 24, '#37474f');
+          for (let c = 0; c < 4; c++) {
+            if ((f + c) % 3 !== 0) {
+              rect(parkX + 15 + c * 48, 303 + f * 27, 38, 16, ['#d32f2f', '#1976d2', '#607d8b', '#ffd54f'][(f+c) % 4]);
+            }
+          }
+        }
+        
+        // "PARKING" sign
+        rect(parkX + 60, 280, 80, 14, '#1565c0');
+        
+        // Entry ramp
+        ctx.fillStyle = '#455a64';
+        ctx.beginPath();
+        ctx.moveTo(parkX + parkW, 400); ctx.lineTo(parkX + parkW, 370);
+        ctx.lineTo(parkX + parkW + 40, 400); ctx.closePath();
+        ctx.fill();
+        
+      } else if (p < 0.6) {
+        // Demolition/construction
+        const demoP = (p - 0.35) / 0.25;
+        const remainH = 110 * (1 - demoP);
+        
+        if (remainH > 20) {
+          rect(parkX, 400 - remainH, parkW, remainH, '#546e7a');
+        }
+        
+        // Scaffolding
+        for (let i = 0; i < 4; i++) {
+          rect(parkX + 10 + i * 50, 300, 4, 100, '#ff8a65');
+        }
+        rect(parkX + 5, 340, parkW - 10, 4, '#ffab91');
+        
+        // Construction robots
+        drawConstructionRobot(parkX + 60, 385);
+        drawConstructionRobot(parkX + 140, 380);
+        
+        // Rubble
+        for (let i = 0; i < 8; i++) {
+          rect(parkX + 20 + i * 22, 390 - demoP * 30 + Math.sin(i) * 5, 12, 8, '#78909c');
+        }
+        
+      } else {
+        // Transit plaza with bike share and waiting area
+        const plazaP = (p - 0.6) / 0.4;
+        
+        // Plaza ground
+        rect(parkX - 20, 340, parkW + 60, 60, '#c9b896');
+        for (let py = 340; py < 400; py += 15) {
+          for (let px = parkX - 20; px < parkX + parkW + 40; px += 18) {
+            rect(px + 1, py + 1, 16, 13, '#b8a785');
+          }
+        }
+        
+        // Covered waiting area
+        rect(parkX, 310, 120, 35, '#e0e0e0');
+        rect(parkX + 5, 315, 110, 25, 'rgba(135,206,235,0.3)');
+        // Benches
+        rect(parkX + 15, 330, 35, 7, '#5d4037');
+        rect(parkX + 70, 330, 35, 7, '#5d4037');
+        
+        // Bike/scooter share
+        rect(parkX + 140, 350, 80, 30, '#e8e8e8');
+        rect(parkX + 142, 352, 76, 26, '#f5f5f5');
+        for (let i = 0; i < 4; i++) {
+          if ((i + Math.floor(time/8000)) % 5 !== 0) {
+            drawEBike(parkX + 155 + i * 18, 370);
+          }
+        }
+        // Sign (visual only - green with bike icon)
+        rect(parkX + 160, 342, 40, 10, '#4caf50');
+        circle(parkX + 170, 347, 3, '#fff');
+        circle(parkX + 178, 347, 3, '#fff');
+        rect(parkX + 182, 344, 12, 3, '#fff');
+        
+        // Small green area
+        rect(parkX - 15, 360, 50, 35, '#4a8c5a');
+        drawTree(parkX + 10, 375, 0.4 * plazaP, 1);
+        
+        // Flower bed
+        for (let i = 0; i < 4; i++) {
+          drawFlowerCluster(parkX - 10 + i * 14, 375);
+        }
+      }
+      
+      // === TRAIN/METRO LINE (bottom) ===
+      const trackY = 445;
+      
+      // Track bed
+      rect(0, trackY, 1000, 35, lerpColor('#5d4037', '#37474f', p));
+      
+      if (p < 0.5) {
+        // Old diesel tracks
+        rect(0, trackY + 8, 1000, 4, '#546e7a');
+        rect(0, trackY + 22, 1000, 4, '#546e7a');
+        for (let i = 0; i < 1000; i += 20) rect(i, trackY + 5, 12, 22, '#3e2723');
+        
+        // Train
+        if (Math.floor(time/8000) % 2 === 0) {
+          drawTrain((time/5) % 1300 - 200, trackY + 3);
+        }
+      } else {
+        // Modern maglev
+        rect(0, trackY + 5, 1000, 22, '#263238');
+        rect(0, trackY + 10, 1000, 4, '#4fc3f7');
+        rect(0, trackY + 20, 1000, 3, '#4fc3f7');
+        
+        // Modern train
+        if (Math.floor(time/6000) % 2 === 0) {
+          drawModernTrain((time/4) % 1300 - 180, trackY - 5);
+        }
+      }
+    }
+    
+    function drawTransitGround(p) {
+      // Street level
+      rect(0, 480, 1000, 25, '#909090');
+      
+      // Front area
+      rect(0, 505, 1000, 145, lerpColor('#707070', '#5a8a5a', Math.max(0, (p - 0.5) * 2)));
+      
+      if (p > 0.6) {
+        for (let i = 0; i < 1000; i += 10) rect(i, 510 + (i % 12), 3, 6, '#5a9c6a');
+      }
+    }
+    
+    function drawTransitActivity(p) {
+      // People throughout - scales with progress
+      const baseCount = 4;
+      const futureCount = Math.floor(p * 8);
+      
+      // Base commuters
+      for (let i = 0; i < baseCount; i++) {
+        const px = 100 + i * 200 + Math.sin(i * 1.5) * 30;
+        drawPerson(px, 500, ['#e91e63', '#2196f3', '#4caf50', '#ff9800'][i]);
+      }
+      
+      // Walking commuters
+      const walkerX = 50 + (time/22) % 650;
+      drawPerson(walkerX, 498, '#9c27b0');
+      
+      // Additional people as city transforms
+      if (p > 0.5) {
+        for (let i = 0; i < futureCount; i++) {
+          const px = 80 + i * 110;
+          const py = 502 + (i % 2) * 4;
+          drawPerson(px, py, ['#00bcd4', '#ffeb3b', '#8bc34a', '#ff5722', '#673ab7', '#009688', '#ffc107', '#795548'][i % 8]);
+        }
+        
+        // Delivery robot
+        drawDeliveryRobot(350 + Math.sin(time/1300) * 100, 497, 0.8);
+      }
+    }
+    
+    // ==================== DOWNTOWN ====================
+    function drawDowntownZone(p) {
+      drawSky(p, 0.05);
+      drawDowntownBuildings(p);
+      drawDowntownStreet(p);
+      drawDowntownActivity(p);
+    }
+    
+    function drawDowntownBuildings(p) {
+      const buildings = [
+        { x: 5, w: 65, h: 170 }, { x: 85, w: 80, h: 215 }, { x: 180, w: 70, h: 185 },
+        { x: 270, w: 95, h: 245 }, { x: 385, w: 65, h: 195 }, { x: 470, w: 85, h: 225 },
+        { x: 575, w: 75, h: 205 }, { x: 670, w: 70, h: 175 }, { x: 760, w: 80, h: 235 },
+        { x: 860, w: 70, h: 190 }, { x: 945, w: 55, h: 165 }
+      ];
+      
+      buildings.forEach((b, i) => {
+        const h = b.h + p * 45;
+        const y = 395 - h;
+        
+        rect(b.x + 3, y - 3, b.w, h, '#2d2d4c');
+        rect(b.x, y, b.w, h, i % 2 === 0 ? '#3a5a7a' : '#4a4a6a');
+        rect(b.x, y, b.w, 3, i % 2 === 0 ? '#4a7a9a' : '#6a6a8a');
+        
+        // Windows
+        for (let row = 0; row < h / 16; row++) {
+          for (let col = 0; col < b.w / 12; col++) {
+            const wx = b.x + 3 + col * 12, wy = y + 5 + row * 16;
+            if (row === Math.floor(h/16) - 1 && col >= b.w/24 - 1) continue;
+            const lit = (i + row + col) % 4 !== 0;
+            rect(wx, wy, 9, 12, lit ? ((i + row) % 3 === 0 ? '#6ab7d4' : '#ffd700') : '#1a1a2e');
+          }
+        }
+        
+        // Vertical gardens
+        if (p > 0.5 && i % 3 === 0) {
+          ctx.globalAlpha = (p - 0.5) * 2;
+          rect(b.x + 2, y + 20, 5, h - 50, '#4caf50');
+          rect(b.x + b.w - 7, y + 20, 5, h - 50, '#4caf50');
+          ctx.globalAlpha = 1;
+        }
+        
+        // Rooftop gardens
+        if (p > 0.4) {
+          rect(b.x + 4, y - 4, b.w - 8, 6, '#5d4037');
+          for (let j = 0; j < (b.w - 10) / 9; j++) {
+            const ph = ((p - 0.4) / 0.6) * 7;
+            rect(b.x + 6 + j * 9, y - 4 - ph, 2, ph, '#4caf50');
+          }
+        }
+      });
+    }
+    
+    function drawDowntownStreet(p) {
+      // Street level / plaza
+      const plazaY = 395;
+      
+      if (p < 0.35) {
+        // Road-dominated
+        rect(0, plazaY, 1000, 95, '#505050');
+        rect(0, plazaY + 35, 1000, 30, '#3a3a3a');
+        for (let i = 0; i < 1000; i += 50) rect(i + 10, plazaY + 48, 32, 4, '#f0c040');
+        
+        // Cars
+        drawCar(80 + (time/15) % 350, plazaY + 40, '#d32f2f', 1);
+        drawCar(500 + (time/18) % 300, plazaY + 40, '#607d8b', 1);
+        drawCar(750 - (time/17) % 320, plazaY + 40, '#1976d2', -1);
+        
+        // Sparse benches
+        rect(150, plazaY + 12, 30, 6, '#5d4037');
+        rect(650, plazaY + 75, 30, 6, '#5d4037');
+        
+      } else {
+        // Pedestrian plaza
+        rect(0, plazaY, 1000, 95, '#c9b896');
+        for (let py = plazaY; py < plazaY + 95; py += 16) {
+          for (let px = 0; px < 1000; px += 20) {
+            rect(px + 1, py + 1, 18, 14, '#b8a785');
+          }
+        }
+        
+        // === CENTRAL FOUNTAIN ===
+        circle(500, plazaY + 45, 40, '#455a64');
+        circle(500, plazaY + 45, 35, '#4fc3f7');
+        circle(500, plazaY + 45, 28, '#81d4fa');
+        const waterH = 15 + Math.sin(time/150) * 5;
+        rect(497, plazaY + 45 - waterH, 6, waterH, '#b3e5fc');
+        // Side jets
+        for (let i = 0; i < 4; i++) {
+          const angle = i * Math.PI / 2 + time / 1000;
+          const jx = 500 + Math.cos(angle) * 22;
+          const jy = plazaY + 45 + Math.sin(angle) * 22;
+          const jh = 8 + Math.sin(time/200 + i) * 3;
+          rect(jx - 2, jy - jh, 4, jh, '#b3e5fc');
+        }
+        
+        // === FARMERS MARKET (left side) ===
+        if (p > 0.5) {
+          ctx.globalAlpha = (p - 0.5) * 2;
+          
+          // Market stalls
+          for (let i = 0; i < 3; i++) {
+            const stallX = 60 + i * 70;
+            // Canopy
+            rect(stallX, plazaY + 8, 55, 5, ['#e53935', '#43a047', '#fb8c00'][i]);
+            // Table
+            rect(stallX + 5, plazaY + 12, 45, 20, '#8d6e63');
+            // Goods
+            for (let g = 0; g < 4; g++) {
+              const goodColor = ['#ff5722', '#ffeb3b', '#4caf50', '#e91e63'][g];
+              circle(stallX + 12 + g * 10, plazaY + 20, 4, goodColor);
+            }
+            // Vendor
+            drawTinyPerson(stallX + 28, plazaY + 10, ['#fff', '#795548', '#ffcc99'][i]);
+          }
+          
+          // "FARMERS MARKET" banner
+          rect(80, plazaY - 5, 130, 12, '#4caf50');
+          ctx.fillStyle = '#fff'; ctx.font = '6px monospace';
+          ctx.fillText('FARMERS MARKET', 95, plazaY + 4);
+          
+          ctx.globalAlpha = 1;
+        }
+        
+        // === FOOD COURT / COMMUNAL DINING (right side) ===
+        if (p > 0.55) {
+          ctx.globalAlpha = (p - 0.55) * 2.5;
+          
+          // Food stalls
+          for (let i = 0; i < 3; i++) {
+            const stallX = 750 + i * 70;
+            rect(stallX, plazaY + 10, 55, 25, '#37474f');
+            rect(stallX + 5, plazaY + 12, 45, 18, ['#ff8a65', '#81c784', '#64b5f6'][i]);
+            // Menu board
+            rect(stallX + 15, plazaY + 5, 25, 8, '#1a1a1a');
+          }
+          
+          // Communal tables
+          for (let t = 0; t < 4; t++) {
+            const tx = 720 + t * 65;
+            rect(tx, plazaY + 55, 50, 8, '#8d6e63');
+            // Benches
+            rect(tx + 5, plazaY + 45, 40, 5, '#5d4037');
+            rect(tx + 5, plazaY + 65, 40, 5, '#5d4037');
+          }
+          
+          ctx.globalAlpha = 1;
+        }
+        
+        // === GREEN ZONES with seating ===
+        for (let gz = 0; gz < 3; gz++) {
+          const gzX = 280 + gz * 130;
+          if (Math.abs(gzX - 500) > 55) {
+            rect(gzX - 20, plazaY + 10, 40, 35, '#4a8c5a');
+            drawTree(gzX, plazaY + 35, 0.35, 1);
+            // Circular bench around tree
+            circle(gzX, plazaY + 38, 15, '#8d6e63');
+            circle(gzX, plazaY + 38, 10, '#4a8c5a');
+          }
+        }
+        
+        // === CAFE SEATING scattered ===
+        const cafeSpots = [320, 380, 600, 660];
+        cafeSpots.forEach((cx, i) => {
+          if (Math.abs(cx - 500) > 50) {
+            drawCafeTable(cx, plazaY + 70 + (i % 2) * 8);
+          }
+        });
+        
+        // === COMMUNITY NOTICE BOARD ===
+        if (p > 0.7) {
+          rect(435, plazaY + 5, 30, 25, '#5d4037');
+          rect(437, plazaY + 7, 26, 21, '#fff');
+          // Colorful notices
+          rect(438, plazaY + 8, 8, 6, '#e91e63');
+          rect(448, plazaY + 8, 8, 6, '#4caf50');
+          rect(458, plazaY + 8, 4, 6, '#2196f3');
+          rect(438, plazaY + 16, 10, 5, '#ff9800');
+          rect(450, plazaY + 16, 12, 5, '#9c27b0');
+        }
+      }
+      
+      // Front sidewalk
+      rect(0, 490, 1000, 25, '#909090');
+      
+      // Front area
+      rect(0, 515, 1000, 135, lerpColor('#505050', '#5a8a5a', Math.max(0, (p - 0.5) * 2)));
+      if (p > 0.6) {
+        for (let i = 0; i < 1000; i += 10) rect(i, 520 + (i % 12), 3, 6, '#5a9c6a');
+      }
+    }
+    
+    function drawDowntownActivity(p) {
+      // Base foot traffic
+      for (let i = 0; i < 5; i++) {
+        const px = 80 + i * 180;
+        drawPerson(px, 505, ['#e91e63', '#2196f3', '#4caf50', '#ff9800', '#9c27b0'][i]);
+      }
+      
+      // Walking people
+      const walker1X = (time/20) % 900 + 50;
+      const walker2X = 950 - (time/25) % 900;
+      drawPerson(walker1X, 508, '#00bcd4');
+      drawPerson(walker2X, 506, '#8bc34a');
+      
+      if (p > 0.4) {
+        // Market shoppers (left side)
+        if (p > 0.55) {
+          for (let i = 0; i < 4; i++) {
+            drawTinyPerson(80 + i * 50 + Math.sin(time/800 + i) * 15, 435 + (i % 2) * 8, ['#ec407a', '#42a5f5', '#66bb6a', '#ffa726'][i]);
+          }
+        }
+        
+        // Food court diners (right side)
+        if (p > 0.6) {
+          // People at communal tables
+          for (let t = 0; t < 4; t++) {
+            const tx = 730 + t * 65;
+            drawSeatedPerson(tx + 10, 438, ['#e91e63', '#2196f3', '#4caf50', '#ff9800'][t]);
+            if (t % 2 === 0) drawSeatedPerson(tx + 30, 438, ['#9c27b0', '#00bcd4', '#8bc34a', '#ff5722'][t]);
+            drawSeatedPerson(tx + 20, 462, ['#ffeb3b', '#607d8b', '#795548', '#009688'][t]);
+          }
+          
+          // Queue at food stalls
+          for (let i = 0; i < 3; i++) {
+            drawTinyPerson(770 + i * 70, 438, ['#fff', '#ffcc99', '#8d6e63'][i]);
+            if (p > 0.75) drawTinyPerson(780 + i * 70, 440, '#e0e0e0');
+          }
+        }
+        
+        // Fountain gathering
+        if (p > 0.5) {
+          drawTinyPerson(470, 448, '#e91e63');
+          drawTinyPerson(530, 450, '#2196f3');
+          drawTinyPerson(485, 465, '#4caf50');
+          drawTinyPerson(515, 463, '#ff9800');
+          
+          // Kids near fountain
+          if (p > 0.7) {
+            drawChild(475, 455, '#ffeb3b');
+            drawChild(525, 457, '#26c6da');
+          }
+        }
+        
+        // Delivery robots
+        drawDeliveryRobot(250 + Math.sin(time/1100) * 60, 485, 0.8);
+        if (p > 0.6) drawDeliveryRobot(700 + Math.cos(time/1300) * 50, 487, 0.8);
+        
+        // Street performer with crowd
+        if (p > 0.7) {
+          drawPerson(350, 505, '#ff5722');
+          for (let i = 0; i < 5; i++) {
+            drawTinyPerson(330 + i * 10, 508 + (i % 2) * 3, ['#e91e63', '#2196f3', '#4caf50', '#ff9800', '#9c27b0'][i]);
+          }
+        }
+      }
+      
+      // Flying drone
+      if (p > 0.75) {
+        ctx.globalAlpha = (p - 0.75) / 0.25;
+        drawFlyingDrone(500 + Math.sin(time/2000) * 200, 90 + Math.sin(time/1500) * 15);
+        ctx.globalAlpha = 1;
+      }
+    }
+    
+    // ==================== INDUSTRIAL (from v7) ====================
+    function drawIndustrialZone(p) {
+      drawSky(p, 0.5);
+      drawIndustrialBuildings(p);
+      drawIndustrialGround(p);
+      if (p > 0.45) drawIndustrialUnderground(p);
+    }
+    
+    function drawIndustrialBuildings(p) {
+      // Factory 1: Human → Robot optimized
+      const f1X = 40, f1W = lerp(200, 95, p), f1H = lerp(90, 220, p), f1Y = 410 - f1H;
+      rect(f1X + 3, f1Y - 3, f1W, f1H, '#37474f');
+      rect(f1X, f1Y, f1W, f1H, '#546e7a');
+      
+      if (p < 0.4) {
+        // Human factory: windows, doors, safety
+        for (let r = 0; r < 2; r++) for (let c = 0; c < f1W / 38; c++) {
+          rect(f1X + 12 + c * 38, f1Y + 18 + r * 32, 28, 22, '#5a7a8a');
+        }
+        for (let i = 0; i < 2; i++) rect(f1X + 18 + i * 75, f1Y + f1H - 45, 50, 45, '#263238');
+      } else {
+        // Robot factory: 3D conveyors, no windows
+        const levels = Math.floor(f1H / 26);
+        for (let lv = 0; lv < levels; lv++) {
+          const ly = f1Y + 12 + lv * 26;
+          rect(f1X + 4, ly, f1W - 8, 3, '#37474f');
+          const itemX = f1X + 8 + ((time / (7 + lv)) % (f1W - 20));
+          rect(itemX, ly - 7, 10, 7, lv % 2 === 0 ? '#4fc3f7' : '#ff8a65');
+          if (lv % 2 === 0) drawMiniArm(f1X + 20 + (lv * 15) % (f1W - 40), ly + 3);
+        }
+        // Diagonal conveyor
+        ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(f1X + 8, f1Y + 25); ctx.lineTo(f1X + f1W - 12, f1Y + f1H - 35); ctx.stroke();
+      }
+      
+      // Factory 2: Warehouse → Dense storage
+      const f2X = 170, f2W = lerp(180, 80, p), f2H = lerp(70, 190, p), f2Y = 410 - f2H;
+      rect(f2X, f2Y, f2W, f2H, '#455a64');
+      
+      if (p < 0.35) {
+        rect(f2X + f2W/2 - 30, f2Y + f2H - 50, 60, 50, '#263238');
+        drawForklift(f2X + 80, f2Y + f2H - 18);
+      } else {
+        const cols = Math.floor(f2W / 14), rows = Math.floor(f2H / 16);
+        for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+          rect(f2X + 5 + c * 14, f2Y + 6 + r * 16, 12, 14, (r + c + Math.floor(time/2500)) % 3 !== 0 ? '#4fc3f7' : '#1a1a2e');
+        }
+      }
+      
+      // Factory 3: 3D print farm
+      const f3X = 290, f3W = lerp(130, 70, p), f3H = lerp(80, 175, p), f3Y = 410 - f3H;
+      rect(f3X, f3Y, f3W, f3H, '#37474f');
+      
+      if (p > 0.4) {
+        const pRows = Math.floor(f3H / 32), pCols = Math.floor(f3W / 20);
+        for (let r = 0; r < pRows; r++) for (let c = 0; c < pCols; c++) {
+          const px = f3X + 6 + c * 20, py = f3Y + 10 + r * 32;
+          rect(px, py, 16, 26, '#263238');
+          rect(px + 2, py + 2, 12, 18, '#1a1a1a');
+          const headY = py + 4 + Math.abs(Math.sin(time/280 + r + c)) * 10;
+          rect(px + 3, headY, 8, 2, '#ff5722');
+        }
+      }
+      
+      // Data center
+      const f4X = 395, f4W = lerp(90, 65, p), f4H = lerp(65, 160, p), f4Y = 410 - f4H;
+      rect(f4X, f4Y, f4W, f4H, '#283593');
+      for (let r = 0; r < f4H / 12; r++) {
+        rect(f4X + 4, f4Y + 6 + r * 12, f4W - 8, 10, '#1a1a2e');
+        for (let l = 0; l < (f4W - 12) / 5; l++) {
+          const on = Math.floor(time/50 + l * 2 + r * 4) % 4 === 0;
+          circle(f4X + 8 + l * 5, f4Y + 11 + r * 12, 1.5, on ? '#4caf50' : '#1b5e20');
+        }
+      }
+      
+      // Vertical farm
+      if (p > 0.35) {
+        ctx.globalAlpha = Math.min(1, (p - 0.35) / 0.25);
+        const farmX = 495, farmW = 65, farmH = lerp(35, 160, (p - 0.35) / 0.65), farmY = 410 - farmH;
+        rect(farmX, farmY, farmW, farmH, '#2e7d32');
+        for (let lv = 0; lv < farmH / 18; lv++) {
+          const ly = farmY + 6 + lv * 18;
+          rect(farmX + 4, ly + 10, farmW - 8, 3, '#5d4037');
+          rect(farmX + 4, ly, farmW - 8, 2, '#7b1fa2');
+          for (let pl = 0; pl < 6; pl++) {
+            const plH = 4 + Math.sin(time/400 + pl + lv) * 2;
+            rect(farmX + 8 + pl * 9, ly + 10 - plH, 3, plH, '#81c784');
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+      
+      // Rewilded area
+      if (p > 0.5) {
+        ctx.globalAlpha = (p - 0.5) * 2;
+        rect(600, 340, 200, 70, '#5a8c5a');
+        drawTree(650, 365, 0.45, 1); drawTree(720, 358, 0.5, 1); drawTree(780, 368, 0.4, 1);
+        for (let i = 0; i < 12; i++) circle(615 + i * 15, 355 + Math.sin(i) * 8, 3, ['#e91e63', '#ffeb3b', '#9c27b0'][i % 3]);
+        ctx.globalAlpha = 1;
+      }
+      
+      // AMRs
+      if (p > 0.35) {
+        drawAMR(140 + Math.sin(time/900) * 60, 395);
+        drawAMR(340 + Math.cos(time/1100) * 50, 398);
+      }
+    }
+    
+    function drawIndustrialGround(p) {
+      rect(0, 280, 1000, 22, '#505050');
+      if (p < 0.4) for (let i = 0; i < 4; i++) drawTruck(70 + i * 200, 285);
+      rect(0, 302, 1000, 108, lerpColor('#4a4a4a', '#5a7a5a', Math.max(0, (p - 0.45) * 2)));
+      rect(0, 410, 1000, 40, '#707070');
+      rect(0, 450, 1000, 70, lerpColor('#505050', '#5a8a5a', Math.max(0, (p - 0.5) * 2)));
+    }
+    
+    function drawIndustrialUnderground(p) {
+      ctx.globalAlpha = Math.min(1, (p - 0.45) / 0.2);
+      rect(0, 520, 1000, 130, '#4e342e');
+      rect(0, 540, 1000, 45, '#263238');
+      rect(0, 545, 1000, 35, '#1a1a1a');
+      const p1X = (time/7) % 1150 - 75, p2X = 1075 - (time/9) % 1150;
+      drawFreightPod(p1X, 550, '#4fc3f7'); drawFreightPod(p2X, 555, '#ff8a65');
+      for (let i = 100; i < 900; i += 200) { rect(i - 10, 510, 20, 35, '#37474f'); rect(i - 7, 512, 14, 30, '#263238'); }
+      ctx.globalAlpha = 1;
+    }
+    
+    // ==================== SHARED COMPONENTS ====================
+    function drawTree(x, y, s, h) {
+      rect(x - 3*s, y - 20*s, 6*s, 25*s, '#5d4037');
+      ellipse(x, y - 35*s, 16*s, 14*s, '#388e3c');
+      ellipse(x - 7*s, y - 31*s, 12*s, 10*s, h > 0.7 ? '#4caf50' : '#7cb342');
+      ellipse(x + 7*s, y - 33*s, 12*s, 11*s, h > 0.7 ? '#4caf50' : '#7cb342');
+      ellipse(x, y - 28*s, 13*s, 10*s, '#81c784');
+    }
+    function drawPerson(x, y, c) {
+      ellipse(x, y + 2, 5, 2, 'rgba(0,0,0,0.15)');
+      rect(x - 2, y - 9, 2, 11, '#1565c0'); rect(x, y - 9, 2, 11, '#1976d2');
+      rect(x - 4, y - 20, 8, 12, c);
+      rect(x - 3, y - 29, 6, 9, '#ffcc99'); rect(x - 4, y - 32, 8, 4, '#4a3728');
+    }
+    function drawChild(x, y, c) {
+      ellipse(x, y + 2, 4, 1.5, 'rgba(0,0,0,0.15)');
+      rect(x - 2, y - 5, 2, 7, '#1565c0'); rect(x, y - 5, 2, 7, '#1976d2');
+      rect(x - 3, y - 12, 6, 8, c); rect(x - 3, y - 19, 6, 7, '#ffcc99');
+    }
+    function drawTinyPerson(x, y, c) { circle(x, y - 4, 2.5, '#ffcc99'); rect(x - 2, y - 1, 4, 5, c); }
+    function drawSeatedPerson(x, y, c) { circle(x, y - 8, 3, '#ffcc99'); rect(x - 3, y - 5, 6, 6, c); rect(x - 4, y + 1, 8, 3, '#1565c0'); }
+    function drawElderlyPerson(x, y) {
+      ellipse(x, y + 2, 5, 2, 'rgba(0,0,0,0.15)');
+      rect(x - 2, y - 9, 2, 11, '#5d4037'); rect(x, y - 9, 2, 11, '#5d4037');
+      rect(x - 4, y - 20, 8, 12, '#7e57c2'); rect(x - 3, y - 29, 6, 9, '#ffcc99');
+      rect(x - 4, y - 32, 8, 4, '#bdbdbd'); rect(x + 8, y - 14, 2, 16, '#5d4037');
+    }
+    function drawJogger(x, y) {
+      ellipse(x, y + 2, 5, 2, 'rgba(0,0,0,0.15)');
+      const legOffset = Math.sin(time/80) * 3;
+      rect(x - 3, y - 9 + legOffset, 2, 11, '#1565c0'); rect(x + 1, y - 9 - legOffset, 2, 11, '#1565c0');
+      rect(x - 4, y - 20, 8, 12, '#ff5722');
+      rect(x - 3, y - 29, 6, 9, '#ffcc99');
+    }
+    function drawCyclist(x, y) {
+      circle(x - 8, y + 5, 6, '#333'); circle(x + 8, y + 5, 6, '#333');
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - 8, y + 5); ctx.lineTo(x, y - 2); ctx.lineTo(x + 8, y + 5); ctx.stroke();
+      circle(x, y - 10, 3, '#ffcc99'); rect(x - 2, y - 7, 4, 6, '#2196f3');
+    }
+    function drawDog(x, y) {
+      ellipse(x, y, 8, 5, '#8d6e63'); ellipse(x + 10, y - 2, 5, 4, '#8d6e63');
+      rect(x - 6, y + 3, 2, 5, '#8d6e63'); rect(x - 2, y + 3, 2, 5, '#8d6e63');
+      rect(x + 2, y + 3, 2, 5, '#8d6e63'); rect(x + 6, y + 3, 2, 5, '#8d6e63');
+      const wag = Math.sin(time/80) * 0.5;
+      ctx.save(); ctx.translate(x - 8, y); ctx.rotate(wag); rect(-1, -6, 2, 8, '#8d6e63'); ctx.restore();
+    }
+    function drawParkedCar(x, y, c) {
+      ellipse(x + 16, y + 18, 16, 4, 'rgba(0,0,0,0.2)');
+      rect(x, y + 4, 32, 11, c); rect(x + 5, y, 22, 7, c);
+      rect(x + 7, y + 2, 8, 4, '#a8d8ea'); rect(x + 17, y + 2, 8, 4, '#a8d8ea');
+      circle(x + 7, y + 15, 3.5, '#222'); circle(x + 25, y + 15, 3.5, '#222');
+    }
+    function drawCar(x, y, c, d) {
+      ctx.save(); if (d < 0) { ctx.translate(x + 16, 0); ctx.scale(-1, 1); x = 0; }
+      ellipse(x + 16, y + 16, 16, 4, 'rgba(0,0,0,0.2)');
+      rect(x, y + 4, 32, 10, c); rect(x + 4, y, 24, 6, c);
+      rect(x + 6, y + 1, 9, 4, '#a8d8ea'); rect(x + 17, y + 1, 9, 4, '#a8d8ea');
+      circle(x + 7, y + 14, 3.5, '#222'); circle(x + 25, y + 14, 3.5, '#222');
+      ctx.restore();
+    }
+    function drawBus(x, y) {
+      rect(x, y, 55, 28, '#ffd54f');
+      rect(x + 4, y + 4, 11, 14, '#81d4fa');
+      for (let i = 0; i < 2; i++) rect(x + 20 + i * 14, y + 4, 10, 14, '#81d4fa');
+      circle(x + 10, y + 28, 5, '#333'); circle(x + 45, y + 28, 5, '#333');
+    }
+    function drawAutoPod(x, y) {
+      roundRect(x, y, 48, 24, 8, '#4fc3f7'); roundRect(x + 4, y + 4, 40, 14, 4, '#1a1a2e');
+      const g = Math.sin(time/150) * 0.3 + 0.7;
+      circle(x + 5, y + 12, 3, `rgba(0,255,150,${g})`); circle(x + 43, y + 12, 3, `rgba(0,255,150,${g})`);
+    }
+    function drawEBike(x, y) {
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 4, y - 7); ctx.lineTo(x + 8, y); ctx.stroke();
+      circle(x, y, 3, '#333'); circle(x + 8, y, 3, '#333');
+      rect(x + 2, y - 4, 4, 2, '#4caf50');
+    }
+    function drawTrain(x, y) {
+      if (x < -150 || x > 1020) return;
+      rect(x, y, 60, 22, '#455a64'); rect(x + 4, y + 4, 16, 10, '#81d4fa');
+      for (let c = 0; c < 2; c++) { rect(x + 65 + c * 50, y + 2, 45, 18, '#78909c'); for (let w = 0; w < 3; w++) rect(x + 70 + c * 50 + w * 13, y + 4, 9, 10, '#81d4fa'); }
+      circle(x + 12, y + 22, 4, '#333'); circle(x + 48, y + 22, 4, '#333');
+    }
+    function drawModernTrain(x, y) {
+      if (x < -150 || x > 1020) return;
+      ctx.fillStyle = '#e0e0e0';
+      ctx.beginPath(); ctx.moveTo(x, y + 11); ctx.quadraticCurveTo(x + 18, y, x + 32, y); ctx.lineTo(x + 32, y + 22); ctx.quadraticCurveTo(x + 18, y + 22, x, y + 11); ctx.fill();
+      rect(x + 32, y, 130, 22, '#e0e0e0');
+      rect(x + 5, y + 9, 157, 4, '#2196f3');
+      for (let i = 0; i < 6; i++) rect(x + 36 + i * 18, y + 3, 13, 14, '#1a1a2e');
+      rect(x + 12, y + 20, 150, 3, '#4fc3f7');
+    }
+    function drawPlanter(x, y, w) {
+      rect(x, y, w, 12, '#8d6e63');
+      for (let i = x + 4; i < x + w - 4; i += 8) {
+        const h = 8 + Math.sin(i * 0.4) * 3;
+        rect(i, y - h, 3, h, '#4caf50'); if (h > 6) circle(i + 1, y - h - 2, 3, '#66bb6a');
+      }
+    }
+    function drawBikeRack(x, y) {
+      for (let i = 0; i < 3; i++) {
+        ctx.strokeStyle = '#78909c'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x + i * 12, y, 6, 0, Math.PI); ctx.stroke();
+      }
+    }
+    function drawFlowerCluster(x, y) {
+      rect(x - 1, y, 2, 8, '#4caf50'); rect(x + 4, y + 1, 2, 7, '#4caf50'); rect(x - 5, y + 2, 2, 6, '#4caf50');
+      circle(x, y - 2, 3, '#e91e63'); circle(x + 5, y, 3, '#ffeb3b'); circle(x - 4, y + 1, 3, '#9c27b0');
+    }
+    function drawCafeTable(x, y) {
+      circle(x, y - 10, 8, '#ff6b6b'); rect(x - 1, y - 10, 2, 10, '#5d4037');
+      rect(x - 6, y, 12, 3, '#8d6e63'); rect(x - 1, y + 3, 2, 5, '#5d4037');
+    }
+    function drawJackhammerRobot(x, y) {
+      rect(x - 9, y + 5, 18, 8, '#455a64');
+      rect(x - 6, y - 7, 12, 14, '#ff8a65'); rect(x - 4, y - 5, 8, 8, '#e64a19');
+      rect(x - 3, y - 3, 6, 4, '#1a1a2e');
+      const shake = Math.sin(time/25) * 2;
+      rect(x + 4, y - 2 + shake, 4, 16, '#666');
+      if (Math.floor(time/45) % 2 === 0) circle(x + 6, y + 16, 2, '#ffeb3b');
+    }
+    function drawConstructionRobot(x, y) {
+      rect(x - 14, y + 4, 28, 10, '#455a64');
+      rect(x - 10, y - 10, 20, 16, '#ff8a65');
+      rect(x - 7, y - 7, 14, 10, '#e64a19');
+      const armA = Math.sin(time/400) * 0.4;
+      ctx.save(); ctx.translate(x + 8, y - 4); ctx.rotate(armA);
+      rect(0, -2, 18, 4, '#ff8a65'); rect(16, -3, 6, 6, '#e64a19');
+      ctx.restore();
+      if (Math.floor(time/300) % 2 === 0) circle(x, y - 14, 3, '#ff5722');
+    }
+    function drawDeliveryRobot(x, y, s = 1) {
+      ellipse(x, y + 4*s, 7*s, 2.5*s, 'rgba(0,0,0,0.15)');
+      circle(x - 5*s, y + 3*s, 2.5*s, '#333'); circle(x + 5*s, y + 3*s, 2.5*s, '#333');
+      rect(x - 7*s, y - 9*s, 14*s, 11*s, '#4fc3f7');
+      rect(x - 4*s, y - 7*s, 8*s, 5*s, '#1a1a2e');
+      const g = Math.sin(time/180) * 0.3 + 0.7;
+      circle(x - 2*s, y - 4*s, 1.2*s, `rgba(0,255,100,${g})`); circle(x + 2*s, y - 4*s, 1.2*s, `rgba(0,255,100,${g})`);
+    }
+    function drawHelperRobot(x, y) {
+      ellipse(x, y + 2, 7, 3, 'rgba(0,0,0,0.15)');
+      rect(x - 3, y - 11, 3, 13, '#0288d1'); rect(x, y - 11, 3, 13, '#4fc3f7');
+      rect(x - 5, y - 26, 10, 15, '#4fc3f7');
+      circle(x, y - 18, 2.5, `rgba(0,255,200,${Math.sin(time/250) * 0.4 + 0.6})`);
+      rect(x - 4, y - 38, 8, 10, '#4fc3f7'); rect(x - 2, y - 36, 4, 6, '#1a1a2e');
+    }
+    function drawFlyingDrone(x, y) {
+      const h = Math.sin(time/250) * 3;
+      ellipse(x - 18, y + h - 8, 9, 3, 'rgba(100,100,100,0.4)');
+      ellipse(x + 18, y + h - 8, 9, 3, 'rgba(100,100,100,0.4)');
+      rect(x - 12, y + h - 6, 24, 9, '#ff8a65');
+      rect(x - 7, y + h + 3, 4, 9, '#666'); rect(x + 3, y + h + 3, 4, 9, '#666');
+      rect(x - 14, y + h + 12, 28, 20, '#4fc3f7');
+    }
+    function drawAMR(x, y) {
+      ellipse(x, y + 7, 15, 5, 'rgba(0,0,0,0.15)');
+      roundRect(x - 16, y - 10, 32, 18, 5, '#4fc3f7');
+      rect(x - 10, y - 6, 20, 8, '#1a1a2e');
+      const g = Math.sin(time/160) * 0.3 + 0.7;
+      circle(x - 5, y - 2, 2.5, `rgba(0,255,100,${g})`); circle(x + 5, y - 2, 2.5, `rgba(0,255,100,${g})`);
+      circle(x - 11, y + 5, 4, '#333'); circle(x + 11, y + 5, 4, '#333');
+      rect(x - 12, y - 18, 24, 10, '#8d6e63');
+    }
+    function drawTruck(x, y) {
+      rect(x, y, 55, 26, '#607d8b'); rect(x + 55, y + 6, 22, 20, '#455a64');
+      rect(x + 62, y + 8, 12, 10, '#81d4fa');
+      circle(x + 12, y + 26, 5, '#222'); circle(x + 42, y + 26, 5, '#222'); circle(x + 66, y + 26, 5, '#222');
+    }
+    function drawForklift(x, y) {
+      rect(x, y - 10, 26, 14, '#ffd54f');
+      rect(x - 10, y - 4, 12, 3, '#666'); rect(x - 10, y + 1, 12, 3, '#666');
+      circle(x + 5, y + 4, 3.5, '#333'); circle(x + 20, y + 4, 3.5, '#333');
+    }
+    function drawMiniArm(x, y) {
+      rect(x, y, 3, 10, '#ff8a65');
+      const a = Math.sin(time/280) * 0.4;
+      ctx.save(); ctx.translate(x + 1, y);
+      ctx.rotate(a); rect(-1, -8, 3, 10, '#e64a19'); rect(-2, -10, 5, 3, '#bf360c');
+      ctx.restore();
+    }
+    function drawFreightPod(x, y, c) {
+      if (x < -40 || x > 1040) return;
+      roundRect(x - 18, y, 36, 18, 4, c);
+      rect(x - 10, y + 4, 7, 6, '#1a1a2e'); rect(x + 3, y + 4, 7, 6, '#1a1a2e');
+    }
+    
+    // ==================== MAIN ====================
+    function render() {
+      ctx.clearRect(0, 0, 1000, 650);
+      switch (currentZone) {
+        case 'residential': drawResidentialZone(progress); break;
+        case 'industrial': drawIndustrialZone(progress); break;
+        case 'transit': drawTransitZone(progress); break;
+        case 'downtown': drawDowntownZone(progress); break;
+      }
+      yearEl.textContent = Math.round(2025 + progress * 20);
+      if (progress < 0.35) { eraEl.textContent = 'THE CAR ERA'; eraEl.className = 'era-label'; }
+      else if (progress < 0.75) { eraEl.textContent = 'THE TRANSITION'; eraEl.className = 'era-label transition'; }
+      else { eraEl.textContent = 'ROBOTS FIRST'; eraEl.className = 'era-label future'; }
+    }
+    
+    function animate() {
+      time = Date.now();
+      progress += (targetProgress - progress) * 0.12;
+      if (autoPlay) { targetProgress += 0.0006; if (targetProgress > 1) targetProgress = 0; slider.value = targetProgress * 100; }
+      render();
+      requestAnimationFrame(animate);
+    }
+    animate();
+  </script>
+</body>
+</html>
